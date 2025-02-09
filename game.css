@@ -1,0 +1,20 @@
+﻿body
+{
+    text-align: center;
+    vertical-align: middle;
+}
+
+.game-row {
+    padding: 0px;
+    margin: 0px;
+    height: 25px;
+}
+
+.game-cell {
+    background-color: green;
+    height: 25px;
+    width: 25px;
+    display: inline-block;
+    padding: 0px;
+    margin: 0px;
+}
