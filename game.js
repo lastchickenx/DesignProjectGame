@@ -166,12 +166,13 @@ class Entity {
     }
 
     addComponent(component) {
-        component.hasOwnProperty("name");
+        if (!component.hasOwnProperty("name")) {
+            throw Error("Component doesn't have a name: " + component.toString());
+        }
 
         this[component.name] = component;
     }
 }
-
 //#endregion
 
 //#region Drawing System
@@ -180,8 +181,12 @@ class DrawingSystem {
         entities.forEach(entity => {
             const eleList = document.getElementsByClassName(entity.id);
             for (let i = 0; i < eleList.length; i++) {
-                if (!eleList[0].parentElement.classList.contains(entity.position.x + "-" + entity.position.y)) {
-                    eleList[0].remove();
+                if (!eleList[i].parentElement.classList.contains(entity.oldPosition.x + "-" + entity.oldPosition.y)) {
+                    eleList[i].remove();
+                } else {
+                    console.log("Can't find ele: " + entity.id);
+                    console.log(eleList[i].parentElement.classList);
+                    console.log(entity.position.x + "-" + entity.position.y);
                 }
             }
 
@@ -205,11 +210,9 @@ class MonsterSystem {
 
 //#region Walking Systems
 class MovingSystem {
-    processPosition(entities, deltaTime) {
-        entities.forEach(entity => {
+    processPosition(entityList, deltaTime) {
+        entityList.forEach(entity => {
             if (entity.path.node === null) {
-                console.log("empty path");
-//                entity.addComponent(KillComponent);
                 return;
             }
 
@@ -224,13 +227,17 @@ class MovingSystem {
                 if (entity.path.node !== null) {
                     entity.position.x = entity.path.node.x;
                     entity.position.y = entity.path.node.y;
+                } else {
+                    entity.position.x = -1;
+                    entity.position.y = -1;
+                    entity.addComponent(new DamageEventComponent(entity.health.healthPoints, player));
                 }
             }
         });
     }
 }
 
-const cleanUp = ["oldPosition"];
+const cleanUp = ["oldPosition", "infoChanged", "towerCreated", "destroy", "damage"];
 class CleanUpSystem {
     cleanEntities(entities) {
         entities.forEach(entity => {
@@ -239,6 +246,132 @@ class CleanUpSystem {
             }
         });
     }
+}
+//#endregion
+
+//#region Tower Creation System
+class TowerCreationSystem {
+    processTowerCreate(entityList) {
+        entityList.forEach(entity => {
+            const x = entity.towerCreated.x;
+            const y = entity.towerCreated.y;
+
+            if (player.player.money < entity.towerFactory.cost) {
+                logger.info("Not enough money to create tower!");
+                return;
+            }
+
+            const newTower = entity.towerFactory.create(x, y);
+
+            player.player.money = player.player.money - entity.towerFactory.cost;
+            player.addComponent(new EventComponent("infoChanged"));
+
+            entities.push(newTower);
+        });
+    }
+}
+//#endregion
+
+//#region Tower Update System
+class TowerUpdateSystem {
+    processTowerUpdates(towers, monsters, deltaTime) {
+        towers.forEach(tower => {
+            const currentTower = tower.tower;
+            const towerPosition = tower.position;
+
+            if ((currentTower.currentAttackTimer + deltaTime) >= currentTower.attackTimer) {
+                for (let i = 0, n = monsters.length; i < n; i++) {
+                    const monsterPosition = monsters[i].position;
+
+                    if (isWithinTowerRange(towerPosition.x, towerPosition.y, monsterPosition.x, monsterPosition.y, currentTower.minRange, currentTower.maxRange)) {
+                        currentTower.currentAttackTimer = 0;
+                        monsters[i].addComponent(new DamageEventComponent(currentTower.damage, monsters[i]));
+                        monsters[i].addComponent(new EventComponent("infoChanged"));
+                        break;
+                    }
+                }
+            } else {
+                currentTower.currentAttackTimer += deltaTime;
+            }
+        });
+    }
+}
+
+function isWithinTowerRange(sourceX, sourceY, targetX, targetY, minRange, maxRange) {
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    return distance <= maxRange && distance > minRange;
+}
+//#endregion
+
+//#region Damage System
+class DamageSystem {
+    processDamageEvents(entityList) {
+        entityList.forEach(entity => {
+            const amount = entity.damage.amount;
+            const target = entity.damage.target;
+
+            target.health.healthPoints -= amount;
+            target.addComponent(new EventComponent("infoChanged"));
+
+            if (target.health.healthPoints <= 0) {
+                target.health.healthPoints = 0;
+                target.addComponent(new EventComponent("destroy"));
+            }
+        });
+    }
+}
+//#endregion
+
+//#region Info System
+class InfoSystem {
+    processInfoEvents(entities) {
+        const monsterInfo = document.getElementById("monsterInfo");
+
+        entities.forEach(entity => {
+            if (entity.hasOwnProperty("player")) {
+                const playerHealth = document.getElementById("playerHealth");
+                const playerMoney = document.getElementById("playerMoney");
+
+                playerHealth.innerText = `Player Health: ${entity.health.healthPoints}`;
+                playerMoney.innerText = `Player Money: ${entity.player.money}`;
+            } else {
+                const infoId = `info-${entity.id}`;
+
+                const eles = document.getElementsByClassName(infoId);
+                if (eles.length === 0) {
+                    buildInfoRow(infoId, entity, monsterInfo);
+                } else {
+                    changeInfoRow(entity, eles[0]);
+                }
+            }
+        });
+    }
+}
+
+function buildInfoRow(infoId, entity, parent) {
+    var row = document.createElement("div");
+    row.classList.add(infoId);
+    row.classList.add("info-row");
+    
+    const img = document.createElement("img");
+    img.src = entity.drawable.imgPath;
+
+    const health = document.createElement("div");
+    health.classList.add("health");
+    health.innerHTML = `Health: ${entity.health.healthPoints}`;
+
+    row.appendChild(img);
+    row.appendChild(health);
+
+    parent.appendChild(row);
+}
+
+function changeInfoRow(entity, ele) {
+    const health = ele.getElementsByClassName("health")[0];
+    health.innerHTML = `Health: ${entity.health.healthPoints}`;
 }
 //#endregion
 
@@ -276,12 +409,69 @@ class DrawComponent {
 }
 
 class TowerFactoryComponent {
-    constructor(create, type, minRange, maxRange) {
+    constructor(create, type, minRange, maxRange, cost) {
         this.name = "towerFactory";
         this.create = create;
         this.min = minRange;
         this.max = maxRange;
         this.type = type;
+        this.cost = cost;
+    }
+}
+
+class TowerComponent {
+    constructor(minRange, maxRange, attackTimer, damage) {
+        this.name = "tower";
+        this.minRange = minRange;
+        this.maxRange = maxRange;
+        this.attackTimer = attackTimer;
+        this.currentAttackTimer = 0;
+        this.damage = damage;
+    }
+}
+
+class EventComponent {
+    constructor(eventName) {
+        this.name = eventName;
+    }
+}
+
+class DamageEventComponent {
+    constructor(amount, target) {
+        this.name = "damage";
+        this.amount = amount;
+        this.target = target;
+    }
+}
+
+class TowerCreatedEventComponent {
+    constructor(x, y) {
+        this.name = "towerCreated";
+        this.x = x;
+        this.y = y;
+    }
+}
+
+class HealthComponent {
+    constructor(hp) {
+        this.name = "health";
+        this.healthPoints = hp;
+    }
+}
+
+class MonsterInfoComponent {
+    constructor() {
+        this.name = "monsterInfo";
+        this.distanceTraveled = 0;
+        this.destroyed = false;
+        this.killed = false;
+    }
+}
+
+class PlayerInfoComponent {
+    constructor(money) {
+        this.name = "player";
+        this.money = money;
     }
 }
 //#endregion
@@ -295,6 +485,9 @@ function createGhost(path) {
     entity.addComponent(new DrawComponent("images/ghost.png"));
     entity.addComponent(new PositionComponent(path.startNode.x, path.startNode.y));
     entity.addComponent(new ChangedPositionComponent(path.startNode.x, path.startNode.y));
+    entity.addComponent(new HealthComponent(10));
+    entity.addComponent(new MonsterInfoComponent());
+    entity.addComponent(new EventComponent("infoChanged"));
 
     return entity;
 }
@@ -305,6 +498,9 @@ function createSkeleton(path) {
     entity.addComponent(new DrawComponent("images/skeleton.png"));
     entity.addComponent(new PositionComponent(path.startNode.x, path.startNode.y));
     entity.addComponent(new ChangedPositionComponent(path.startNode.x, path.startNode.y));
+    entity.addComponent(new HealthComponent(12));
+    entity.addComponent(new MonsterInfoComponent());
+    entity.addComponent(new EventComponent("infoChanged"));
 
     return entity;
 }
@@ -315,6 +511,9 @@ function createRat(path) {
     entity.addComponent(new DrawComponent("images/rat.png"));
     entity.addComponent(new PositionComponent(path.startNode.x, path.startNode.y));
     entity.addComponent(new ChangedPositionComponent(path.startNode.x, path.startNode.y));
+    entity.addComponent(new HealthComponent(90));
+    entity.addComponent(new MonsterInfoComponent());
+    entity.addComponent(new EventComponent("infoChanged"));
 
     return entity;
 }
@@ -343,7 +542,6 @@ class MonsterGenerator {
             this.time = 0;
             this.currentMonster += 1;
         }
-
     }
 }
 //#endregion
@@ -357,12 +555,15 @@ function createArrowTowerFactory() {
         entity.addComponent(new DrawComponent("images/arrowTower1.png"));
         entity.addComponent(new PositionComponent(x, y));
         entity.addComponent(new ChangedPositionComponent(x, y));
+        entity.addComponent(new TowerComponent(2, 5, 1500, 3));
+
+        return entity;
     }
 
     const towerEntity = new Entity("arrowFactory");
     towerEntity.addComponent(new DrawComponent("images/arrowTower1.png"));
     towerEntity.addComponent(new PositionComponent(-1, -1));
-    towerEntity.addComponent(new TowerFactoryComponent(createArrowTower, "arrow", 2, 5));
+    towerEntity.addComponent(new TowerFactoryComponent(createArrowTower, "arrow", 2, 5, 3));
 
     return towerEntity;
 }
@@ -374,43 +575,44 @@ function createMagicTowerFactory() {
         entity.addComponent(new DrawComponent("images/magicTower1.png"));
         entity.addComponent(new PositionComponent(x, y));
         entity.addComponent(new ChangedPositionComponent(x, y));
+        entity.addComponent(new TowerComponent(0, 2, 500, 2));
+
+        return entity;
     }
 
     const towerEntity = new Entity("magicFactory");
     towerEntity.addComponent(new DrawComponent("images/magicTower1.png"));
     towerEntity.addComponent(new PositionComponent(-1, -1));
-    towerEntity.addComponent(new TowerFactoryComponent(createMagicTower, "magic", 0, 2));
+    towerEntity.addComponent(new TowerFactoryComponent(createMagicTower, "magic", 0, 2, 5));
 
     return towerEntity;
 }
 
 //#endregion
 
-class TowerMoveEvent {
-    constructor(entity, oldX, oldY, x, y) {
-        this.entity = entity;
-        this.oldX = oldX;
-        this.oldY = oldY;
-        this.x = x;
-        this.y = y;
-    }
-}
-
-const logger = new Logger(DEBUG_LEVEL);
+const logger = new Logger(INFO_LEVEL);
 const world = createStaticWorld(logger);
 const grassDistribution = new Distribution([[3, 70], [2, 20], [1,10]]);
 const dirtDistribution = new Distribution([[2, 50], [1, 25], [3, 5]]);
 
 const drawSystem = new DrawingSystem();
 const moveSystem = new MovingSystem();
+const infoSystem = new InfoSystem();
 const cleanUpSystem = new CleanUpSystem();
+const towerCreationSystem = new TowerCreationSystem();
+const towerUpdateSystem = new TowerUpdateSystem();
+const damageSystem = new DamageSystem();
 
-const entities = [];
+const player = new Entity("player");
+player.addComponent(new PlayerInfoComponent(10));
+player.addComponent(new HealthComponent(100));
+player.addComponent(new EventComponent("infoChanged"));
+
+const entities = [player];
 const generator = new MonsterGenerator(world.path, entities);
 
 const towerFactories = [createArrowTowerFactory(), createMagicTowerFactory()];
 towerFactories.forEach(factory => entities.push(factory));
-const towerMoveEvents = {};
 
 const factoriesBuildIcon = {}
 var currentTowerFactory = null;
@@ -484,7 +686,7 @@ document.addEventListener("DOMContentLoaded",
                             highlight.classList.add("highlight-green");
                         });
                     }
-                    logger.debug(`mouse enter time: ${Date.now() - mouseEnterTime}`);
+                    logger.trace(`mouse enter time: ${Date.now() - mouseEnterTime}`);
                 });
                 cell.addEventListener("mouseleave", () => {
                     logger.trace(`leaving: ${refI}, ${refJ}`);
@@ -499,12 +701,12 @@ document.addEventListener("DOMContentLoaded",
                             highlight.classList.remove("highlight-green");
                         });
                     }
-                    logger.debug(`mouse leave time: ${Date.now() - mouseLeaveTime}`);
+                    logger.trace(`mouse leave time: ${Date.now() - mouseLeaveTime}`);
                 });
                 cell.addEventListener("click", () => {
                     logger.trace(`clicking: ${refI}, ${refJ}`);
                     if (currentTowerFactory != null) {
-                        currentTowerFactory.towerFactory.create(refI, refJ);
+                        currentTowerFactory.addComponent(new TowerCreatedEventComponent(refI, refJ));
                     }
                 });
                 row.appendChild(cell);
@@ -550,8 +752,6 @@ document.addEventListener("DOMContentLoaded",
         gameLoop();
     });
 
-
-
 function gameLoop() {
     const currentTime = Date.now();
     const deltaTime = currentTime - previousTime;
@@ -560,16 +760,23 @@ function gameLoop() {
 
     generator.generateNextMonster(deltaTime);
 
+    towerCreationSystem.processTowerCreate(entities.filter(entity => entity.hasOwnProperty("towerCreated")));
 
+    towerUpdateSystem.processTowerUpdates(entities.filter(entity => entity.hasOwnProperty("tower")), entities.filter(entity => entity.hasOwnProperty("monsterInfo")), deltaTime);
 
     const moveSystemTime = Date.now();
-    moveSystem.processPosition(
-        entities.filter(entity => entity.hasOwnProperty("path") && entity.hasOwnProperty("position")), deltaTime);
+    moveSystem.processPosition(entities.filter(entity => entity.hasOwnProperty("path") && entity.hasOwnProperty("position")), deltaTime);
     logger.debug(`processPosition: elapsed seconds: ${Date.now() - moveSystemTime}`);
+
+    damageSystem.processDamageEvents(entities.filter(entity => entity.hasOwnProperty("damage")));
 
     const drawSystemTime = Date.now();
     drawSystem.processDrawEvents(entities.filter(entity => entity.hasOwnProperty("position") && entity.hasOwnProperty("oldPosition")));
     logger.debug(`processDrawEvents: elapsed seconds: ${Date.now() - drawSystemTime}`);
+
+    const infoSystemTime = Date.now();
+    infoSystem.processInfoEvents(entities.filter(entity => entity.hasOwnProperty("infoChanged")));
+    logger.debug(`processInfoEvents: elapsed seconds: ${Date.now() - infoSystemTime}`);
 
     const cleanSystemTime = Date.now();
     cleanUpSystem.cleanEntities(entities);

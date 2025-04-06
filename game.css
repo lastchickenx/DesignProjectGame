@@ -13,6 +13,17 @@ body > div {
 
 #info {
     width: 15%;
+    border: .25rem solid;
+    vertical-align: top;
+}
+
+.info-row {
+    height: 20px;
+    border: .1rem solid green;
+}
+
+.info-row > * {
+    display: inline-block;
 }
 
 #build {
@@ -40,6 +51,11 @@ body > div {
     height: 16px;
 }
 
+.magicFactory {
+    width: 16px;
+    height: 16px;
+}
+
 .game-row {
     padding: 0px;
     margin: 0px;
@@ -54,6 +70,11 @@ body > div {
     overflow: hidden;
     padding: 0px;
     margin: 0px;
+}
+
+.game-cell > * {
+    height: 16px;
+    width: 16px;
 }
 
 /*#region Map Background Styles*/
