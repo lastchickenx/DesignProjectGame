@@ -237,7 +237,7 @@ class MovingSystem {
     }
 }
 
-const cleanUp = ["oldPosition", "infoChanged", "towerCreated", "destroy", "damage"];
+const cleanUp = ["oldPosition", "infoChanged", "towerCreated", "damage"];
 class CleanUpSystem {
     cleanEntities(entities) {
         entities.forEach(entity => {
@@ -320,6 +320,20 @@ class DamageSystem {
                 target.health.healthPoints = 0;
                 target.addComponent(new EventComponent("destroy"));
             }
+        });
+    }
+}
+//#endregion
+
+//#region Destroy System
+class DestroySystem {
+    processDestroyEvents(entityList) {
+        entityList.forEach(entity => {
+            const position = entity.position;
+            
+            entity.addComponent(new ChangedPositionComponent(position.x, position.y));
+            entity.position.x = -1;
+            entity.position.y = -1;
         });
     }
 }
@@ -602,6 +616,7 @@ const cleanUpSystem = new CleanUpSystem();
 const towerCreationSystem = new TowerCreationSystem();
 const towerUpdateSystem = new TowerUpdateSystem();
 const damageSystem = new DamageSystem();
+const destroySystem = new DestroySystem();
 
 const player = new Entity("player");
 player.addComponent(new PlayerInfoComponent(10));
@@ -770,6 +785,8 @@ function gameLoop() {
 
     damageSystem.processDamageEvents(entities.filter(entity => entity.hasOwnProperty("damage")));
 
+    destroySystem.processDestroyEvents(entities.filter(entity => entity.hasOwnProperty("destroy")));
+
     const drawSystemTime = Date.now();
     drawSystem.processDrawEvents(entities.filter(entity => entity.hasOwnProperty("position") && entity.hasOwnProperty("oldPosition")));
     logger.debug(`processDrawEvents: elapsed seconds: ${Date.now() - drawSystemTime}`);
@@ -781,6 +798,17 @@ function gameLoop() {
     const cleanSystemTime = Date.now();
     cleanUpSystem.cleanEntities(entities);
     logger.debug(`cleanEntities: elapsed seconds: ${Date.now() - cleanSystemTime}`);
+
+    const removeList = [];
+    for (let i = 0; i < entities.length; i++) {
+        if (entities[i].hasOwnProperty("destroy")) {
+            removeList.push(i);
+        }
+    }
+
+    for (let i = 0; i < removeList.length; i++) {
+        console.log(entities.splice(removeList[i], 1));
+    }
 
     previousTime = currentTime;
     sleep(10).then(gameLoop);
